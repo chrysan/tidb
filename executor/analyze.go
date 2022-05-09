@@ -1381,13 +1381,13 @@ func (e *AnalyzeColumnsExec) subMergeWorker(resultCh chan<- *samplingMergeResult
 		colRespSize := int64(colResp.Size())
 		e.memTracker.Consume(colRespSize)
 		subCollector := statistics.NewRowSampleCollector(int(e.analyzePB.ColReq.SampleSize), e.analyzePB.ColReq.GetSampleRate(), l)
-		tmpMemSize := subCollector.Base().FromProto(colResp.RowCollector, e.memTracker)
+		subCollector.Base().FromProto(colResp.RowCollector, e.memTracker)
 		UpdateAnalyzeJob(e.ctx, e.job, subCollector.Base().Count)
 		oldRetCollectorSize := retCollector.Base().MemSize
 		retCollector.MergeCollector(subCollector)
 		newRetCollectorSize := retCollector.Base().MemSize
 		subCollectorSize := subCollector.Base().MemSize
-		ReleaseMemory(e.memTracker, dataSize+colRespSize+tmpMemSize+oldRetCollectorSize+subCollectorSize-newRetCollectorSize)
+		ReleaseMemory(e.memTracker, dataSize+colRespSize+oldRetCollectorSize+subCollectorSize-newRetCollectorSize)
 	}
 	resultCh <- &samplingMergeResult{collector: retCollector}
 }

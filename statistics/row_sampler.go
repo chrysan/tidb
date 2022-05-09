@@ -269,7 +269,7 @@ func (s *baseCollector) ToProto() *tipb.RowSampleCollector {
 	return collector
 }
 
-func (s *baseCollector) FromProto(pbCollector *tipb.RowSampleCollector, memTracker *memory.Tracker) (tmpMemSize int64) {
+func (s *baseCollector) FromProto(pbCollector *tipb.RowSampleCollector, memTracker *memory.Tracker) {
 	s.Count = pbCollector.Count
 	s.NullCount = pbCollector.NullCounts
 	s.FMSketches = make([]*FMSketch, 0, len(pbCollector.FmSketch))
@@ -282,27 +282,24 @@ func (s *baseCollector) FromProto(pbCollector *tipb.RowSampleCollector, memTrack
 	// consume mandatory memory at the beginning, if exceeds, fast fail
 	if len(pbCollector.Samples) > 0 {
 		rowLen := len(pbCollector.Samples[0].Row)
-		// 24 is the size of datum array, 8 is the size of reference
+		// 8 is the size of reference
 		initMemSize := int64(sampleNum) * (int64(rowLen)*types.EmptyDatumSize + EmptyReservoirSampleItemSize + 8)
 		s.MemSize += initMemSize
-		tmpMemSize = int64(sampleNum) * 24
-		memTracker.Consume(initMemSize + tmpMemSize)
+		memTracker.Consume(initMemSize)
 	}
 	bufferedMemSize := int64(0)
 	for _, pbSample := range pbCollector.Samples {
-		rowLen := len(pbCollector.Samples[0].Row)
+		rowLen := len(pbSample.Row)
 		data := make([]types.Datum, 0, rowLen)
-		deltaSize := int64(0)
 		for _, col := range pbSample.Row {
 			b := make([]byte, len(col))
 			copy(b, col)
 			data = append(data, types.NewBytesDatum(b))
-			deltaSize += int64(cap(b))
 		}
 		// Directly copy the weight.
 		sampleItem := &ReservoirRowSampleItem{Columns: data, Weight: pbSample.Weight}
 		s.Samples = append(s.Samples, sampleItem)
-		deltaSize += sampleItem.MemUsage() - EmptyReservoirSampleItemSize
+		deltaSize := sampleItem.MemUsage() - EmptyReservoirSampleItemSize - int64(rowLen)*types.EmptyDatumSize
 		memTracker.BufferedConsume(&bufferedMemSize, deltaSize)
 		s.MemSize += deltaSize
 	}
