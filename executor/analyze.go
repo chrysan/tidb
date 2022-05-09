@@ -1016,7 +1016,7 @@ func (e *AnalyzeColumnsExec) buildSamplingStats(
 	e.samplingMergeWg = &util.WaitGroupWrapper{}
 	e.samplingMergeWg.Add(statsConcurrency)
 	for i := 0; i < statsConcurrency; i++ {
-		go e.subMergeWorker(mergeResultCh, mergeTaskCh, l, i)
+		go e.subMergeWorker(mergeResultCh, mergeTaskCh, l, i == 0)
 	}
 	if err = readDataAndSendTask(e.ctx, e.resultHandler, mergeTaskCh, e.memTracker); err != nil {
 		return 0, nil, nil, nil, nil, getAnalyzePanicErr(err)
@@ -1335,11 +1335,7 @@ type samplingMergeResult struct {
 	err       error
 }
 
-func (e *AnalyzeColumnsExec) subMergeWorker(
-	resultCh chan<- *samplingMergeResult,
-	taskCh <-chan []byte,
-	l int, idx int) {
-	isClosedChanThread := idx == 0
+func (e *AnalyzeColumnsExec) subMergeWorker(resultCh chan<- *samplingMergeResult, taskCh <-chan []byte, l int, isClosedChanThread bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			buf := make([]byte, 4096)
@@ -1404,13 +1400,7 @@ type samplingBuildTask struct {
 	slicePos         int
 }
 
-func (e *AnalyzeColumnsExec) subBuildWorker(
-	resultCh chan error,
-	taskCh chan *samplingBuildTask,
-	hists []*statistics.Histogram,
-	topns []*statistics.TopN,
-	collectors []*statistics.SampleCollector,
-	exitCh chan struct{}) {
+func (e *AnalyzeColumnsExec) subBuildWorker(resultCh chan error, taskCh chan *samplingBuildTask, hists []*statistics.Histogram, topns []*statistics.TopN, collectors []*statistics.SampleCollector, exitCh chan struct{}) {
 	defer func() {
 		if r := recover(); r != nil {
 			buf := make([]byte, 4096)
@@ -1442,7 +1432,8 @@ workLoop:
 				}
 				sampleNum := task.rootRowCollector.Base().Samples.Len()
 				sampleItems := make([]*statistics.SampleItem, 0, sampleNum)
-				initMemSize := int64(unsafe.Sizeof(sampleItems)) + 8*int64(sampleNum) + statistics.EmptySampleItemSize*int64(sampleNum)
+				// consume mandatory memory at the beginning, if exceeds, fast fail
+				initMemSize := int64(unsafe.Sizeof(sampleItems)) + int64(sampleNum)*(8+statistics.EmptySampleItemSize)
 				e.memTracker.Consume(initMemSize)
 				totalMemInc += initMemSize
 				bufferedMemInc := int64(0)
@@ -1461,18 +1452,16 @@ workLoop:
 					val := row.Columns[task.slicePos]
 					if collator != nil {
 						val.SetBytes(collator.Key(val.GetString()))
-						bufferedMemInc += int64(cap(val.GetBytes()))
-						if bufferedMemInc > int64(config.TrackMemWhenExceeds) {
-							e.memTracker.Consume(bufferedMemInc)
-							totalMemInc += bufferedMemInc
-							bufferedMemInc = int64(0)
-						}
+						deltaSize := int64(cap(val.GetBytes()))
+						totalMemInc += deltaSize
+						e.memTracker.BufferedConsume(&bufferedMemInc, deltaSize)
 					}
 					sampleItems = append(sampleItems, &statistics.SampleItem{
 						Value:   val,
 						Ordinal: j,
 					})
 				}
+				e.memTracker.BufferedConsume(&bufferedMemInc, 0)
 				collector = &statistics.SampleCollector{
 					Samples:   sampleItems,
 					NullCount: task.rootRowCollector.Base().NullCount[task.slicePos],
@@ -1486,6 +1475,7 @@ workLoop:
 				idx := e.indexes[task.slicePos-colLen]
 				sampleNum := task.rootRowCollector.Base().Samples.Len()
 				sampleItems := make([]*statistics.SampleItem, 0, sampleNum)
+				// consume mandatory memory at the beginning, if exceeds, fast fail
 				// 8 is size of reference, 32 is the size of "b := make([]byte, 0, 8)"
 				initMemSize := int64(unsafe.Sizeof(sampleItems)) + (8+statistics.EmptySampleItemSize+32)*int64(sampleNum)
 				e.memTracker.Consume(initMemSize)
