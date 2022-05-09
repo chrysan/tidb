@@ -15,10 +15,12 @@
 package executor
 
 import (
+	"go.uber.org/zap"
 	"runtime"
 	"sync"
 
 	"github.com/pingcap/tidb/sessionctx/variable"
+	"github.com/pingcap/tidb/util/logutil"
 	"github.com/pingcap/tidb/util/memory"
 )
 
@@ -64,6 +66,7 @@ func TryGCIfNeeded(force bool) {
 		runtime.GC()
 		for tracker, memVal := range memMapToRelease.memMap {
 			tracker.Consume(-memVal)
+			logutil.BgLogger().Info("memory", zap.Int64("release", memVal))
 		}
 		memMapToRelease.memMap = make(map[*memory.Tracker]int64)
 		memMapToRelease.total = 0

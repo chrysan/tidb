@@ -1045,6 +1045,11 @@ func (e *AnalyzeColumnsExec) buildSamplingStats(
 		return 0, nil, nil, nil, nil, err
 	}
 
+	logutil.BgLogger().Info("memory:", zap.Int64("rootCollector", rootCollectorSize))
+	memStats := &runtime.MemStats{}
+	runtime.ReadMemStats(memStats)
+	logutil.BgLogger().Info("memory:", zap.Uint64("heapInUse", memStats.HeapInuse))
+
 	// handling virtual columns
 	virtualColIdx := buildVirtualColumnIndex(e.schemaForVirtualColEval, e.colsInfo)
 	if len(virtualColIdx) > 0 {
@@ -1163,7 +1168,15 @@ func (e *AnalyzeColumnsExec) buildSamplingStats(
 			return 0, nil, nil, nil, nil, err
 		}
 	}
-	ReleaseMemory(e.memTracker, rootCollectorSize)
+	totalSampleCollectorSize := int64(0)
+	for _, sampleCollector := range sampleCollectors {
+		totalSampleCollectorSize += sampleCollector.MemSize
+	}
+	logutil.BgLogger().Info("memory:", zap.Int64("sampleCollectors", totalSampleCollectorSize))
+	memStats = &runtime.MemStats{}
+	runtime.ReadMemStats(memStats)
+	logutil.BgLogger().Info("memory:", zap.Uint64("heapInUse", memStats.HeapInuse))
+	ReleaseMemory(e.memTracker, rootCollectorSize+totalSampleCollectorSize)
 	return
 }
 
@@ -1423,7 +1436,6 @@ workLoop:
 				break workLoop
 			}
 			var collector *statistics.SampleCollector
-			totalMemInc := int64(0)
 			if task.isColumn {
 				if e.colsInfo[task.slicePos].IsGenerated() && !e.colsInfo[task.slicePos].GeneratedStored {
 					hists[task.slicePos] = nil
@@ -1433,10 +1445,9 @@ workLoop:
 				sampleNum := task.rootRowCollector.Base().Samples.Len()
 				sampleItems := make([]*statistics.SampleItem, 0, sampleNum)
 				// consume mandatory memory at the beginning, if exceeds, fast fail
-				initMemSize := int64(unsafe.Sizeof(sampleItems)) + int64(sampleNum)*(8+statistics.EmptySampleItemSize)
-				e.memTracker.Consume(initMemSize)
-				totalMemInc += initMemSize
-				bufferedMemInc := int64(0)
+				collectorMemSize := int64(unsafe.Sizeof(sampleItems)) + int64(sampleNum)*(8+statistics.EmptySampleItemSize)
+				e.memTracker.Consume(collectorMemSize)
+				bufferedMemSize := int64(0)
 				var collator collate.Collator
 				ft := e.colsInfo[task.slicePos].FieldType
 				// When it's new collation data, we need to use its collate key instead of original value because only
@@ -1453,21 +1464,22 @@ workLoop:
 					if collator != nil {
 						val.SetBytes(collator.Key(val.GetString()))
 						deltaSize := int64(cap(val.GetBytes()))
-						totalMemInc += deltaSize
-						e.memTracker.BufferedConsume(&bufferedMemInc, deltaSize)
+						collectorMemSize += deltaSize
+						e.memTracker.BufferedConsume(&bufferedMemSize, deltaSize)
 					}
 					sampleItems = append(sampleItems, &statistics.SampleItem{
 						Value:   val,
 						Ordinal: j,
 					})
 				}
-				e.memTracker.Consume(bufferedMemInc)
+				e.memTracker.Consume(bufferedMemSize)
 				collector = &statistics.SampleCollector{
 					Samples:   sampleItems,
 					NullCount: task.rootRowCollector.Base().NullCount[task.slicePos],
 					Count:     task.rootRowCollector.Base().Count - task.rootRowCollector.Base().NullCount[task.slicePos],
 					FMSketch:  task.rootRowCollector.Base().FMSketches[task.slicePos],
 					TotalSize: task.rootRowCollector.Base().TotalSizes[task.slicePos],
+					MemSize:   collectorMemSize,
 				}
 			} else {
 				var tmpDatum types.Datum
@@ -1477,9 +1489,8 @@ workLoop:
 				sampleItems := make([]*statistics.SampleItem, 0, sampleNum)
 				// consume mandatory memory at the beginning, if exceeds, fast fail
 				// 8 is size of reference, 32 is the size of "b := make([]byte, 0, 8)"
-				initMemSize := int64(unsafe.Sizeof(sampleItems)) + (8+statistics.EmptySampleItemSize+32)*int64(sampleNum)
-				e.memTracker.Consume(initMemSize)
-				totalMemInc += initMemSize
+				collectorMemSize := int64(unsafe.Sizeof(sampleItems)) + (8+statistics.EmptySampleItemSize+32)*int64(sampleNum)
+				e.memTracker.Consume(collectorMemSize)
 				for _, row := range task.rootRowCollector.Base().Samples {
 					if len(idx.Columns) == 1 && row.Columns[idx.Columns[0].Offset].IsNull() {
 						continue
@@ -1512,12 +1523,16 @@ workLoop:
 					Count:     task.rootRowCollector.Base().Count - task.rootRowCollector.Base().NullCount[task.slicePos],
 					FMSketch:  task.rootRowCollector.Base().FMSketches[task.slicePos],
 					TotalSize: task.rootRowCollector.Base().TotalSizes[task.slicePos],
+					MemSize:   collectorMemSize,
 				}
 			}
 			if task.isColumn {
 				collectors[task.slicePos] = collector
 			}
 			hist, topn, err := statistics.BuildHistAndTopN(e.ctx, int(e.opts[ast.AnalyzeOptNumBuckets]), int(e.opts[ast.AnalyzeOptNumTopN]), task.id, collector, task.tp, task.isColumn)
+			if !task.isColumn {
+				ReleaseMemory(e.memTracker, collector.MemSize)
+			}
 			if err != nil {
 				resultCh <- err
 				continue
@@ -1527,7 +1542,6 @@ workLoop:
 			hists[task.slicePos] = hist
 			topns[task.slicePos] = topn
 			resultCh <- nil
-			ReleaseMemory(e.memTracker, totalMemInc)
 		case <-exitCh:
 			return
 		}
