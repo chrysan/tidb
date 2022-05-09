@@ -269,7 +269,7 @@ func (s *baseCollector) ToProto() *tipb.RowSampleCollector {
 	return collector
 }
 
-func (s *baseCollector) FromProto(pbCollector *tipb.RowSampleCollector, memTracker *memory.Tracker) {
+func (s *baseCollector) FromProto(pbCollector *tipb.RowSampleCollector, memTracker *memory.Tracker) (tmpMemSize int64) {
 	s.Count = pbCollector.Count
 	s.NullCount = pbCollector.NullCounts
 	s.FMSketches = make([]*FMSketch, 0, len(pbCollector.FmSketch))
@@ -285,7 +285,8 @@ func (s *baseCollector) FromProto(pbCollector *tipb.RowSampleCollector, memTrack
 		// 24 is the size of datum array, 8 is the size of reference
 		initMemSize := int64(sampleNum) * (int64(rowLen)*types.EmptyDatumSize + EmptyReservoirSampleItemSize + 8)
 		s.MemSize += initMemSize
-		memTracker.Consume(initMemSize)
+		tmpMemSize = int64(sampleNum) * 24
+		memTracker.Consume(initMemSize + tmpMemSize)
 	}
 	bufferedMemSize := int64(0)
 	for _, pbSample := range pbCollector.Samples {
@@ -307,6 +308,7 @@ func (s *baseCollector) FromProto(pbCollector *tipb.RowSampleCollector, memTrack
 	}
 	memTracker.BufferedConsume(&bufferedMemSize, 0)
 	s.MemSize += bufferedMemSize
+	return
 }
 
 // Base implements the RowSampleCollector interface.
