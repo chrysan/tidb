@@ -279,7 +279,7 @@ func (s *baseCollector) FromProto(pbCollector *tipb.RowSampleCollector, memTrack
 	s.TotalSizes = pbCollector.TotalSize
 	sampleNum := len(pbCollector.Samples)
 	s.Samples = make(WeightedRowSampleHeap, 0, sampleNum)
-	// consume mandatory memory at the beginning, if exceeds, fast fail
+	// consume mandatory memory at the beginning, including all empty ReservoirRowSampleItems and all empty Datums of all sample rows, if exceeds, fast fail
 	if len(pbCollector.Samples) > 0 {
 		rowLen := len(pbCollector.Samples[0].Row)
 		// 8 is the size of reference
@@ -304,7 +304,6 @@ func (s *baseCollector) FromProto(pbCollector *tipb.RowSampleCollector, memTrack
 		s.MemSize += deltaSize
 	}
 	memTracker.Consume(bufferedMemSize)
-	s.MemSize += bufferedMemSize
 }
 
 // Base implements the RowSampleCollector interface.
