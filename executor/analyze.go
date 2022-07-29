@@ -121,7 +121,7 @@ func (e *AnalyzeExec) Next(ctx context.Context, _ *chunk.Chunk) error {
 		dom := domain.GetDomain(e.ctx)
 		dom.SysProcTracker().KillSysProcess(util.GetAutoAnalyzeProcID(dom.ServerID))
 	})
-
+	logutil.BgLogger().Info("start handling global stats")
 	// If we enabled dynamic prune mode, then we need to generate global stats here for partition tables.
 	err = e.handleGlobalStats(ctx, needGlobalStats, globalStatsMap)
 	if err != nil {

@@ -76,7 +76,8 @@ type Tracker struct {
 	bytesReleased int64 // Released bytes.
 	bytesLimit    atomic.Value
 	maxConsumed   atomicutil.Int64 // max number of bytes consumed during execution.
-	isGlobal      bool             // isGlobal indicates whether this tracker is global tracker
+	maxReleased   atomicutil.Int64
+	isGlobal      bool // isGlobal indicates whether this tracker is global tracker
 }
 
 type actionMu struct {
@@ -373,6 +374,9 @@ func (t *Tracker) Consume(bs int64) {
 			if consumed > maxNow && !tracker.maxConsumed.CAS(maxNow, consumed) {
 				continue
 			}
+			if consumed > maxNow && tracker.label == LabelForGlobalAnalyzeMemory {
+				println("maxConsumed=" + strconv.FormatInt(maxNow, 10))
+			}
 			if label, ok := MetricsTypes[tracker.label]; ok {
 				metrics.MemoryUsage.WithLabelValues(label[0], label[1]).Set(float64(consumed))
 			}
@@ -422,8 +426,10 @@ func (t *Tracker) Release(bytes int64) {
 			// use fake ref instead of obj ref, otherwise obj will be reachable again and gc in next cycle
 			newRef := &finalizerRef{}
 			runtime.SetFinalizer(newRef, func(ref *finalizerRef) {
+				println("do release " + strconv.FormatInt(bytes, 10))
 				tracker.release(bytes)
 			})
+			println("release " + strconv.FormatInt(bytes, 10))
 			tracker.recordRelease(bytes)
 			return
 		}
@@ -447,6 +453,16 @@ func (t *Tracker) shouldRecordRelease() bool {
 func (t *Tracker) recordRelease(bytes int64) {
 	for tracker := t; tracker != nil; tracker = tracker.getParent() {
 		bytesReleased := atomic.AddInt64(&tracker.bytesReleased, bytes)
+		for {
+			maxNow := tracker.maxReleased.Load()
+			if bytesReleased > maxNow && !tracker.maxReleased.CAS(maxNow, bytesReleased) {
+				continue
+			}
+			if bytesReleased > maxNow && tracker.label == LabelForGlobalAnalyzeMemory {
+				println("maxReleased=" + strconv.FormatInt(bytesReleased, 10))
+			}
+			break
+		}
 		if label, ok := MetricsTypes[tracker.label]; ok {
 			metrics.MemoryUsage.WithLabelValues(label[0], label[2]).Set(float64(bytesReleased))
 		}
