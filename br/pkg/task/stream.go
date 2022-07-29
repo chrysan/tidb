@@ -573,10 +573,12 @@ func RunStreamMetadata(
 		return errors.Trace(err)
 	}
 
+	logMinDate := stream.FormatDate(oracle.GetTimeFromTS(logMinTS))
+	logMaxDate := stream.FormatDate(oracle.GetTimeFromTS(logMaxTS))
 	summary.Log(cmdName, zap.Uint64("log-min-ts", logMinTS),
-		zap.String("log-min-date", oracle.GetTimeFromTS(logMinTS).String()),
+		zap.String("log-min-date", logMinDate),
 		zap.Uint64("log-max-ts", logMaxTS),
-		zap.String("log-max-date", oracle.GetTimeFromTS(logMaxTS).String()),
+		zap.String("log-max-date", logMaxDate),
 	)
 	return nil
 }
@@ -876,12 +878,7 @@ func RunStreamTruncate(c context.Context, g glue.Glue, cmdName string, cfg *Stre
 			return nil
 		}
 	}
-	if cfg.Until > sp && !cfg.DryRun {
-		if err := restore.SetTSToFile(
-			ctx, storage, cfg.Until, restore.TruncateSafePointFileName); err != nil {
-			return err
-		}
-	}
+
 	readMetaDone := console.ShowTask("Reading Metadata... ", glue.WithTimeCost())
 	metas := restore.StreamMetadataSet{
 		BeforeDoWriteBack: func(path string, last, current *backuppb.Metadata) (skip bool) {
@@ -917,16 +914,14 @@ func RunStreamTruncate(c context.Context, g glue.Glue, cmdName string, cfg *Stre
 		return nil
 	}
 
-	removed := metas.RemoveDataBefore(shiftUntilTS)
-
-	// remove metadata
-	removeMetaDone := console.ShowTask("Removing metadata... ", glue.WithTimeCost())
-	if !cfg.DryRun {
-		if err := metas.DoWriteBack(ctx, storage); err != nil {
+	if cfg.Until > sp && !cfg.DryRun {
+		if err := restore.SetTSToFile(
+			ctx, storage, cfg.Until, restore.TruncateSafePointFileName); err != nil {
 			return err
 		}
 	}
-	removeMetaDone()
+
+	removed := metas.RemoveDataBefore(shiftUntilTS)
 
 	// remove log
 	clearDataFileDone := console.ShowTask(
@@ -939,17 +934,27 @@ func RunStreamTruncate(c context.Context, g glue.Glue, cmdName string, cfg *Stre
 	for _, f := range removed {
 		if !cfg.DryRun {
 			wg.Add(1)
+			finalFile := f
 			worker.Apply(func() {
 				defer wg.Done()
-				if err := storage.DeleteFile(ctx, f.Path); err != nil {
-					log.Warn("File not deleted.", zap.String("path", f.Path), logutil.ShortError(err))
-					console.Print("\n"+em(f.Path), "not deleted, you may clear it manually:", warn(err))
+				if err := storage.DeleteFile(ctx, finalFile.Path); err != nil {
+					log.Warn("File not deleted.", zap.String("path", finalFile.Path), logutil.ShortError(err))
+					console.Print("\n"+em(finalFile.Path), "not deleted, you may clear it manually:", warn(err))
 				}
 			})
 		}
 	}
 	wg.Wait()
 	clearDataFileDone()
+
+	// remove metadata
+	removeMetaDone := console.ShowTask("Removing metadata... ", glue.WithTimeCost())
+	if !cfg.DryRun {
+		if err := metas.DoWriteBack(ctx, storage); err != nil {
+			return err
+		}
+	}
+	removeMetaDone()
 	return nil
 }
 
@@ -1035,9 +1040,15 @@ func restoreStream(
 		if err != nil {
 			summary.Log("restore log failed summary", zap.Error(err))
 		} else {
-			summary.Log("restore log success summary", zap.Duration("total-take", time.Since(startTime)),
+			totalDureTime := time.Since(startTime)
+			summary.Log("restore log success summary", zap.Duration("total-take", totalDureTime),
 				zap.Uint64("restore-from", cfg.StartTS), zap.Uint64("restore-to", cfg.RestoreTS),
-				zap.Uint64("total-kv-count", totalKVCount), zap.Uint64("total-size", totalSize))
+				zap.String("restore-from", stream.FormatDate(oracle.GetTimeFromTS(cfg.StartTS))),
+				zap.String("restore-to", stream.FormatDate(oracle.GetTimeFromTS(cfg.RestoreTS))),
+				zap.Uint64("total-kv-count", totalKVCount),
+				zap.String("total-size", units.HumanSize(float64(totalSize))),
+				zap.String("average-speed", units.HumanSize(float64(totalSize)/float64(totalDureTime.Seconds()))+"/s"),
+			)
 		}
 	}()
 
