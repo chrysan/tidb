@@ -54,6 +54,10 @@ func (e *AnalyzeExec) handleGlobalStats(ctx context.Context, needGlobalStats boo
 				globalOpts = v2Options.FilledOpts
 			}
 		}
+		logutil.BgLogger().Info("mergePartitionStats2GlobalStats for ",
+			zap.Int64("tableID", globalStatsID.tableID),
+			zap.Int64("indexID", globalStatsID.indexID),
+			zap.Int("isIndex", info.isIndex))
 		globalStats, err := statsHandle.MergePartitionStats2GlobalStatsByTableID(e.ctx, globalOpts, e.ctx.GetInfoSchema().(infoschema.InfoSchema), globalStatsID.tableID, info.isIndex, info.histIDs)
 		if err != nil {
 			if types.ErrPartitionStatsMissing.Equal(err) || types.ErrPartitionColumnStatsMissing.Equal(err) {

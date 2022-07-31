@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -472,6 +473,9 @@ func (h *Handle) mergePartitionStats2GlobalStats(sc sessionctx.Context, opts map
 			return
 		}
 		logutil.BgLogger().Info("partition stats is loaded", zap.Int64("partition", partitionID))
+		m := &runtime.MemStats{}
+		runtime.ReadMemStats(m)
+		logutil.BgLogger().Info("heapInUse after load:", zap.Uint64("mem", m.HeapInuse))
 		// if the err == nil && partitionStats == nil, it means we lack the partition-level stats which the physicalID is equal to partitionID.
 		if partitionStats == nil {
 			var errMsg string
