@@ -471,6 +471,7 @@ func (h *Handle) mergePartitionStats2GlobalStats(sc sessionctx.Context, opts map
 		if err != nil {
 			return
 		}
+		logutil.BgLogger().Info("partition stats is loaded", zap.Int64("partition", partitionID))
 		// if the err == nil && partitionStats == nil, it means we lack the partition-level stats which the physicalID is equal to partitionID.
 		if partitionStats == nil {
 			var errMsg string
@@ -505,6 +506,7 @@ func (h *Handle) mergePartitionStats2GlobalStats(sc sessionctx.Context, opts map
 			allFms[i] = append(allFms[i], fms)
 		}
 	}
+	logutil.BgLogger().Info("load all partition stats")
 
 	// After collect all of the statistics from the partition-level stats,
 	// we should merge them together.
@@ -517,6 +519,7 @@ func (h *Handle) mergePartitionStats2GlobalStats(sc sessionctx.Context, opts map
 				return
 			}
 		}
+		logutil.BgLogger().Info("cmsketch merged")
 
 		// Merge topN. We need to merge TopN before merging the histogram.
 		// Because after merging TopN, some numbers will be left.
@@ -526,12 +529,14 @@ func (h *Handle) mergePartitionStats2GlobalStats(sc sessionctx.Context, opts map
 		if err != nil {
 			return
 		}
+		logutil.BgLogger().Info("topn merged")
 
 		// Merge histogram
 		globalStats.Hg[i], err = statistics.MergePartitionHist2GlobalHist(sc.GetSessionVars().StmtCtx, allHg[i], popedTopN, int64(opts[ast.AnalyzeOptNumBuckets]), isIndex == 1)
 		if err != nil {
 			return
 		}
+		logutil.BgLogger().Info("hist merged")
 
 		// NOTICE: after merging bucket NDVs have the trend to be underestimated, so for safe we don't use them.
 		for j := range globalStats.Hg[i].Buckets {
@@ -543,6 +548,7 @@ func (h *Handle) mergePartitionStats2GlobalStats(sc sessionctx.Context, opts map
 		for j := 1; j < partitionNum; j++ {
 			globalStats.Fms[i].MergeFMSketch(allFms[i][j])
 		}
+		logutil.BgLogger().Info("fmsketch merged and updating ndv")
 
 		// update the NDV
 		globalStatsNDV := globalStats.Fms[i].NDV()
