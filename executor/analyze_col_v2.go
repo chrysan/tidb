@@ -17,6 +17,7 @@ package executor
 import (
 	"context"
 	"math"
+	"runtime"
 	"sort"
 	"sync/atomic"
 	"time"
@@ -262,6 +263,10 @@ func (e *AnalyzeColumnsExecV2) buildSamplingStats(
 	if err != nil {
 		return 0, nil, nil, nil, nil, err
 	}
+	logutil.BgLogger().Info("finish merge collector")
+	m := &runtime.MemStats{}
+	runtime.ReadMemStats(m)
+	logutil.BgLogger().Info("heapInUse after merge:", zap.Uint64("mem", m.HeapInuse))
 
 	// handling virtual columns
 	virtualColIdx := buildVirtualColumnIndex(e.schemaForVirtualColEval, e.colsInfo)
@@ -315,6 +320,10 @@ func (e *AnalyzeColumnsExecV2) buildSamplingStats(
 	sampleCollectors := make([]*statistics.SampleCollector, len(e.colsInfo))
 	exitCh := make(chan struct{})
 	e.samplingBuilderWg.Add(statsConcurrency)
+	logutil.BgLogger().Info("start build workers")
+	m = &runtime.MemStats{}
+	runtime.ReadMemStats(m)
+	logutil.BgLogger().Info("heapInUse before build:", zap.Uint64("mem", m.HeapInuse))
 	for i := 0; i < statsConcurrency; i++ {
 		e.samplingBuilderWg.Run(func() {
 			e.subBuildWorker(buildResultChan, buildTaskChan, hists, topns, sampleCollectors, exitCh)
@@ -352,6 +361,7 @@ func (e *AnalyzeColumnsExecV2) buildSamplingStats(
 			isColumn:         false,
 			slicePos:         colLen + i,
 		}
+		logutil.BgLogger().Info("fmsketch size", zap.Int64("mem", rootRowCollector.Base().FMSketches[colLen+i].MemoryUsage()))
 		fmSketches = append(fmSketches, rootRowCollector.Base().FMSketches[colLen+i])
 	}
 	close(buildTaskChan)
@@ -381,6 +391,10 @@ func (e *AnalyzeColumnsExecV2) buildSamplingStats(
 	if err != nil {
 		return 0, nil, nil, nil, nil, err
 	}
+	logutil.BgLogger().Info("after build workers")
+	m = &runtime.MemStats{}
+	runtime.ReadMemStats(m)
+	logutil.BgLogger().Info("heapInUse after build:", zap.Uint64("mem", m.HeapInuse))
 	count = rootRowCollector.Base().Count
 	if needExtStats {
 		statsHandle := domain.GetDomain(e.ctx).StatsHandle()
