@@ -403,10 +403,6 @@ func (e *AnalyzeColumnsExecV2) buildSamplingStats(
 			return 0, nil, nil, nil, nil, err
 		}
 	}
-	runtime.GC()
-	m = &runtime.MemStats{}
-	runtime.ReadMemStats(m)
-	logutil.BgLogger().Info("heapInUse before return:", zap.Uint64("mem", m.HeapInuse))
 	return
 }
 

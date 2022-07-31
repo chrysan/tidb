@@ -16,6 +16,7 @@ package executor
 
 import (
 	"context"
+	"github.com/pingcap/tidb/util/memory"
 
 	"github.com/pingcap/tidb/domain"
 	"github.com/pingcap/tidb/infoschema"
@@ -46,6 +47,9 @@ func (e *AnalyzeExec) handleGlobalStats(ctx context.Context, needGlobalStats boo
 	if !needGlobalStats {
 		return nil
 	}
+	globalStatsTracker := memory.NewTracker(e.ctx.GetSessionVars().PlanID, -1)
+	globalStatsTracker.AttachTo(e.ctx.GetSessionVars().StmtCtx.MemTracker)
+	defer globalStatsTracker.Detach()
 	statsHandle := domain.GetDomain(e.ctx).StatsHandle()
 	for globalStatsID, info := range globalStatsMap {
 		globalOpts := e.opts
@@ -58,7 +62,7 @@ func (e *AnalyzeExec) handleGlobalStats(ctx context.Context, needGlobalStats boo
 			zap.Int64("tableID", globalStatsID.tableID),
 			zap.Int64("indexID", globalStatsID.indexID),
 			zap.Int("isIndex", info.isIndex))
-		globalStats, err := statsHandle.MergePartitionStats2GlobalStatsByTableID(e.ctx, globalOpts, e.ctx.GetInfoSchema().(infoschema.InfoSchema), globalStatsID.tableID, info.isIndex, info.histIDs)
+		globalStats, err := statsHandle.MergePartitionStats2GlobalStatsByTableID(e.ctx, globalOpts, e.ctx.GetInfoSchema().(infoschema.InfoSchema), globalStatsID.tableID, info.isIndex, info.histIDs, globalStatsTracker)
 		if err != nil {
 			if types.ErrPartitionStatsMissing.Equal(err) || types.ErrPartitionColumnStatsMissing.Equal(err) {
 				// When we find some partition-level stats are missing, we need to report warning.

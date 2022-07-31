@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -109,14 +108,6 @@ func (e *AnalyzeExec) Next(ctx context.Context, _ *chunk.Chunk) error {
 	// needGlobalStats used to indicate whether we should merge the partition-level stats to global-level stats.
 	needGlobalStats := pruneMode == variable.Dynamic
 	globalStatsMap := make(map[globalStatsKey]globalStatsInfo)
-	//for _, task := range e.tasks {
-	//	globalStatsID := globalStatsKey{tableID: task.colExec.tableID.TableID, indexID: int64(-1)}
-	//	histIDs := make([]int64, 0, len(task.colExec.colsInfo))
-	//	for _, col := range task.colExec.colsInfo {
-	//		histIDs = append(histIDs, col.ID)
-	//	}
-	//	globalStatsMap[globalStatsID] = globalStatsInfo{isIndex: -1, histIDs: histIDs, statsVersion: 2}
-	//}
 	err = e.handleResultsError(ctx, concurrency, needGlobalStats, globalStatsMap, resultsCh)
 	for _, task := range e.tasks {
 		if task.colExec != nil && task.colExec.memTracker != nil {
@@ -131,12 +122,12 @@ func (e *AnalyzeExec) Next(ctx context.Context, _ *chunk.Chunk) error {
 		dom.SysProcTracker().KillSysProcess(util.GetAutoAnalyzeProcID(dom.ServerID))
 	})
 	logutil.BgLogger().Info("start handling global stats")
-	for i := 0; i < 10; i++ {
-		time.Sleep(time.Second * 10)
-		m := &runtime.MemStats{}
-		runtime.ReadMemStats(m)
-		logutil.BgLogger().Info("heapInUse:", zap.Uint64("mem", m.HeapInuse))
-	}
+	//for i := 0; i < 10; i++ {
+	//	time.Sleep(time.Second * 10)
+	//	m := &runtime.MemStats{}
+	//	runtime.ReadMemStats(m)
+	//	logutil.BgLogger().Info("heapInUse:", zap.Uint64("mem", m.HeapInuse))
+	//}
 	// If we enabled dynamic prune mode, then we need to generate global stats here for partition tables.
 	err = e.handleGlobalStats(ctx, needGlobalStats, globalStatsMap)
 	if err != nil {
