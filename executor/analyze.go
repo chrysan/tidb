@@ -82,41 +82,41 @@ func (e *AnalyzeExec) Next(ctx context.Context, _ *chunk.Chunk) error {
 	if err != nil {
 		return err
 	}
-	//taskCh := make(chan *analyzeTask, len(e.tasks))
-	//resultsCh := make(chan *statistics.AnalyzeResults, len(e.tasks))
+	taskCh := make(chan *analyzeTask, len(e.tasks))
+	resultsCh := make(chan *statistics.AnalyzeResults, len(e.tasks))
 	if len(e.tasks) < concurrency {
 		concurrency = len(e.tasks)
 	}
-	//for i := 0; i < concurrency; i++ {
-	//	e.wg.Run(func() { e.analyzeWorker(taskCh, resultsCh) })
-	//}
-	//for _, task := range e.tasks {
-	//	prepareV2AnalyzeJobInfo(task.colExec, false)
-	//	AddNewAnalyzeJob(e.ctx, task.job)
-	//}
+	for i := 0; i < concurrency; i++ {
+		e.wg.Run(func() { e.analyzeWorker(taskCh, resultsCh) })
+	}
+	for _, task := range e.tasks {
+		prepareV2AnalyzeJobInfo(task.colExec, false)
+		AddNewAnalyzeJob(e.ctx, task.job)
+	}
 	failpoint.Inject("mockKillPendingAnalyzeJob", func() {
 		dom := domain.GetDomain(e.ctx)
 		dom.SysProcTracker().KillSysProcess(util.GetAutoAnalyzeProcID(dom.ServerID))
 	})
-	//for _, task := range e.tasks {
-	//taskCh <- task
-	//}
-	//close(taskCh)
-	//e.wg.Wait()
-	//close(resultsCh)
+	for _, task := range e.tasks {
+		taskCh <- task
+	}
+	close(taskCh)
+	e.wg.Wait()
+	close(resultsCh)
 	pruneMode := variable.PartitionPruneMode(e.ctx.GetSessionVars().PartitionPruneMode.Load())
 	// needGlobalStats used to indicate whether we should merge the partition-level stats to global-level stats.
 	needGlobalStats := pruneMode == variable.Dynamic
 	globalStatsMap := make(map[globalStatsKey]globalStatsInfo)
-	for _, task := range e.tasks {
-		globalStatsID := globalStatsKey{tableID: task.colExec.tableID.TableID, indexID: int64(-1)}
-		histIDs := make([]int64, 0, len(task.colExec.colsInfo))
-		for _, col := range task.colExec.colsInfo {
-			histIDs = append(histIDs, col.ID)
-		}
-		globalStatsMap[globalStatsID] = globalStatsInfo{isIndex: -1, histIDs: histIDs, statsVersion: 2}
-	}
-	//err = e.handleResultsError(ctx, concurrency, needGlobalStats, globalStatsMap, resultsCh)
+	//for _, task := range e.tasks {
+	//	globalStatsID := globalStatsKey{tableID: task.colExec.tableID.TableID, indexID: int64(-1)}
+	//	histIDs := make([]int64, 0, len(task.colExec.colsInfo))
+	//	for _, col := range task.colExec.colsInfo {
+	//		histIDs = append(histIDs, col.ID)
+	//	}
+	//	globalStatsMap[globalStatsID] = globalStatsInfo{isIndex: -1, histIDs: histIDs, statsVersion: 2}
+	//}
+	err = e.handleResultsError(ctx, concurrency, needGlobalStats, globalStatsMap, resultsCh)
 	for _, task := range e.tasks {
 		if task.colExec != nil && task.colExec.memTracker != nil {
 			task.colExec.memTracker.Detach()
