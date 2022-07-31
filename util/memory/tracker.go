@@ -17,6 +17,7 @@ package memory
 import (
 	"bytes"
 	"fmt"
+	"github.com/pingcap/tidb/util/logutil"
 	"runtime"
 	"strconv"
 	"sync"
@@ -375,7 +376,7 @@ func (t *Tracker) Consume(bs int64) {
 				continue
 			}
 			if consumed > maxNow && tracker.label == LabelForGlobalAnalyzeMemory {
-				println("maxConsumed=" + strconv.FormatInt(maxNow, 10))
+				logutil.BgLogger().Info("maxConsumed=" + strconv.FormatInt(maxNow, 10))
 			}
 			if label, ok := MetricsTypes[tracker.label]; ok {
 				metrics.MemoryUsage.WithLabelValues(label[0], label[1]).Set(float64(consumed))
@@ -426,10 +427,10 @@ func (t *Tracker) Release(bytes int64) {
 			// use fake ref instead of obj ref, otherwise obj will be reachable again and gc in next cycle
 			newRef := &finalizerRef{}
 			runtime.SetFinalizer(newRef, func(ref *finalizerRef) {
-				println("do release " + strconv.FormatInt(bytes, 10))
+				logutil.BgLogger().Info("do release " + strconv.FormatInt(bytes, 10))
 				tracker.release(bytes)
 			})
-			println("release " + strconv.FormatInt(bytes, 10))
+			logutil.BgLogger().Info("release " + strconv.FormatInt(bytes, 10))
 			tracker.recordRelease(bytes)
 			return
 		}
@@ -459,7 +460,7 @@ func (t *Tracker) recordRelease(bytes int64) {
 				continue
 			}
 			if bytesReleased > maxNow && tracker.label == LabelForGlobalAnalyzeMemory {
-				println("maxReleased=" + strconv.FormatInt(bytesReleased, 10))
+				logutil.BgLogger().Info("maxReleased=" + strconv.FormatInt(bytesReleased, 10))
 			}
 			break
 		}

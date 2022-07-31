@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -130,6 +131,12 @@ func (e *AnalyzeExec) Next(ctx context.Context, _ *chunk.Chunk) error {
 		dom.SysProcTracker().KillSysProcess(util.GetAutoAnalyzeProcID(dom.ServerID))
 	})
 	logutil.BgLogger().Info("start handling global stats")
+	for i := 0; i < 100; i++ {
+		time.Sleep(time.Second * 12)
+		m := &runtime.MemStats{}
+		runtime.ReadMemStats(m)
+		logutil.BgLogger().Info("heapInUse:", zap.Uint64("mem", m.HeapInuse))
+	}
 	// If we enabled dynamic prune mode, then we need to generate global stats here for partition tables.
 	err = e.handleGlobalStats(ctx, needGlobalStats, globalStatsMap)
 	if err != nil {
