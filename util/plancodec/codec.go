@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019-2025 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -39,6 +39,11 @@ const (
 	lineBreakerStr = "\n"
 	separator      = '\t'
 	separatorStr   = "\t"
+)
+
+var planEscaper = strings.NewReplacer(
+	string(separator), "\\t",
+	string(lineBreaker), "\\n",
 )
 
 var (
@@ -354,8 +359,7 @@ func EncodePlanNode(depth, pid int, planType string, rowCount float64,
 }
 
 func escapeString(s string) string {
-	s = strings.Replace(s, string([]byte{separator}), "\\t", -1)
-	return strings.Replace(s, string([]byte{lineBreaker}), "\\n", -1)
+	return planEscaper.Replace(s)
 }
 
 // NormalizePlanNode is used to normalize the plan to a string.
