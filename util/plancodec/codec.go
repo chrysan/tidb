@@ -41,6 +41,11 @@ const (
 	separatorStr   = "\t"
 )
 
+var planEscaper = strings.NewReplacer(
+	string(separator), "\\t",
+	string(lineBreaker), "\\n",
+)
+
 var (
 	// PlanDiscardedEncoded indicates the discard plan because it is too long
 	PlanDiscardedEncoded = "[discard]"
@@ -354,8 +359,7 @@ func EncodePlanNode(depth, pid int, planType string, rowCount float64,
 }
 
 func escapeString(s string) string {
-	s = strings.Replace(s, string([]byte{separator}), "\\t", -1)
-	return strings.Replace(s, string([]byte{lineBreaker}), "\\n", -1)
+	return planEscaper.Replace(s)
 }
 
 // NormalizePlanNode is used to normalize the plan to a string.
